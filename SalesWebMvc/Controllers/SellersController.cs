@@ -1,61 +1,152 @@
-﻿using SalesWebMvc.Models;
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Threading.Tasks;
-using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.Mvc;
+using SalesWebMvc.Models;
+using SalesWebMvc.Models.ViewModels;
+using SalesWebMvc.Services;
 using SalesWebMvc.Services.Exceptions;
 
-namespace SalesWebMvc.Services
+namespace SalesWebMvc.Controllers
 {
-	public class SellerService
+	public class SellersController : Controller
 	{
-		private readonly SalesWebMvcContext _context;
+		private readonly SellerService _sellerService;
+		private readonly DepartmentService _departmentService;
 
-		public SellerService(SalesWebMvcContext context)
+		public SellersController(SellerService sellerService, DepartmentService departmentService)
 		{
-			_context = context;
+			_sellerService = sellerService;
+			_departmentService = departmentService;
 		}
 
-		public async Task<List<Seller>> FindAllAsync()
+		public async Task<IActionResult> Index()
 		{
-			return await _context.Seller.ToListAsync();
+			var list = await _sellerService.FindAllAsync();
+			return View(list);
 		}
 
-		public async Task InsertAsync(Seller obj)
+		public async Task<IActionResult> Create()
 		{
-			_context.Add(obj);
-			await _context.SaveChangesAsync();
+			var departments = await _departmentService.FindAllAsync();
+			var viewModel = new SellerFormViewModel { Departaments = departments };
+			return View(viewModel);
 		}
 
-		public async Task<Seller> FindByIdAsync(int id)
+		[HttpPost]
+		[ValidateAntiForgeryToken]
+		public async Task<IActionResult> Create(Seller seller)
 		{
-			return await _context.Seller.Include(obj => obj.Department).FirstOrDefaultAsync(obj => obj.Id == id);
-		}
-
-		public async Task RemoveAsync(int id)
-		{
-			var obj = await _context.Seller.FindAsync(id);
-			_context.Seller.Remove(obj);
-			await _context.SaveChangesAsync();
-		}
-
-		public async Task UpdateAsync(Seller obj)
-		{
-			bool hasAny = await _context.Seller.AnyAsync(x => x.Id == obj.Id);
-			if (!hasAny)
+			if (!ModelState.IsValid)
 			{
-				throw new NotFoundException("Id not found");
+				var departments = await _departmentService.FindAllAsync();
+				var viewModel = new SellerFormViewModel { Seller = seller, Departaments = departments };
+				return View(viewModel);
+			}
+			await _sellerService.InsertAsync(seller);
+			return RedirectToAction(nameof(Index));
+		}
+
+		public async Task<IActionResult> Delete(int? id)
+		{
+			if (id == null)
+			{
+				return RedirectToAction(nameof(Error), new { message = "Id not provided" });
+			}
+
+			var obj = await _sellerService.FindByIdAsync(id.Value);
+			if (obj == null)
+			{
+				return RedirectToAction(nameof(Error), new { message = "Id not found" });
+			}
+
+			return View(obj);
+		}
+
+		[HttpPost]
+		[ValidateAntiForgeryToken]
+		public async Task<IActionResult> Delete(int id)
+		{
+			try
+			{
+				await _sellerService.RemoveAsync(id);
+				return RedirectToAction(nameof(Index));
+			}
+			catch (IntegrityException e)
+			{
+				return RedirectToAction(nameof(Error), new { message = e.Message });
+			}
+		}
+
+		public async Task<IActionResult> Details(int? id)
+		{
+			if (id == null)
+			{
+				return RedirectToAction(nameof(Error), new { message = "Id not provided" });
+			}
+
+			var obj = await _sellerService.FindByIdAsync(id.Value);
+			if (obj == null)
+			{
+				return RedirectToAction(nameof(Error), new { message = "Id not found" });
+			}
+
+			return View(obj);
+		}
+
+		public async Task<IActionResult> Edit(int? id)
+		{
+			if (id == null)
+			{
+				return RedirectToAction(nameof(Error), new { message = "Id not provided" });
+			}
+
+			var obj = await _sellerService.FindByIdAsync(id.Value);
+			if (obj == null)
+			{
+				return RedirectToAction(nameof(Error), new { message = "Id not found" });
+			}
+
+			List<Department> departments = await _departmentService.FindAllAsync();
+			SellerFormViewModel viewModel = new SellerFormViewModel { Seller = obj, Departaments = departments };
+			return View(viewModel);
+		}
+
+		[HttpPost]
+		[ValidateAntiForgeryToken]
+		public async Task<IActionResult> Edit(int id, Seller seller)
+		{
+			if (!ModelState.IsValid)
+			{
+				var departments = await _departmentService.FindAllAsync();
+				var viewModel = new SellerFormViewModel { Seller = seller, Departaments = departments };
+				return View(viewModel);
+			}
+			if (id != seller.Id)
+			{
+				return RedirectToAction(nameof(Error), new { message = "Id mismatch" });
 			}
 			try
 			{
-				_context.Update(obj);
-				await _context.SaveChangesAsync();
+				await _sellerService.UpdateAsync(seller);
+				return RedirectToAction(nameof(Index));
 			}
-			catch (DbUpdateConcurrencyException e)
+			catch (ApplicationException e)
 			{
-				throw new DbConcurrencyException(e.Message);
+				return RedirectToAction(nameof(Error), new { message = e.Message });
 			}
+		}
+
+		public IActionResult Error(string message)
+		{
+			var viewModel = new ErrorViewModel
+			{
+				Message = message,
+				RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier
+			};
+			return View(viewModel);
 		}
 	}
 }
